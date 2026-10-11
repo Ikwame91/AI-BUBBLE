@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Token by Token</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="shell">
+  <nav class="side" id="side" aria-label="Sections">
+    <a class="brand" href="#top">Token<span>by</span>Token</a>
+    <ol class="toc">
+      <li class="toc-part">Inside the forward pass</li>
+      <li><a href="#tokenize"><b>1</b>Tokenize</a></li>
+      <li><a href="#embed"><b>2</b>Embed</a></li>
+      <li><a href="#attend"><b>3</b>Attend</a></li>
+      <li><a href="#predict"><b>4</b>Predict &amp; sample</a></li>
+      <li class="toc-part">How a model is made</li>
+      <li><a href="#train"><b>5</b>Pretrain</a></li>
+      <li><a href="#align"><b>6</b>Align</a></li>
+      <li><a href="#reason"><b>7</b>Reason</a></li>
+      <li class="toc-part">Building with it</li>
+      <li><a href="#build"><b>8</b>Chatbots, RAG, agents</a></li>
+      <li class="toc-part">Context</li>
+      <li><a href="#history">Timeline</a></li>
+      <li><a href="#frontier">Research frontier</a></li>
+      <li><a href="#learn">Read next</a></li>
+    </ol>
+  </nav>
+
+  <main id="top">
+    <!-- ============ HERO: the whole loop ============ -->
+    <header class="hero">
+      <p class="eyebrow">An interactive field guide to large language models</p>
+      <h1>Every answer is written one token at a time.</h1>
+      <p class="lede">ChatGPT, Claude, Gemini, DeepSeek and Perplexity all run the same loop: read the text so far, score every possible next token, pick one, append it, repeat. Press <em>Next token</em> and watch each stage of that loop on a tiny model that lives in this page.</p>
+
+      <div class="panel loop" id="loop">
+        <div class="loop-input">
+          <label for="loop-prompt">Prompt</label>
+          <input id="loop-prompt" type="text" value="the king and the" autocomplete="off" spellcheck="false">
+          <div class="btns">
+            <button class="btn primary" id="loop-step">Next token</button>
+            <button class="btn" id="loop-run">Write 12</button>
+            <button class="btn ghost" id="loop-reset">Reset</button>
+          </div>
+        </div>
+        <div class="loop-stages" id="loop-stages"></div>
+        <p class="note">This page's model is a trigram counter trained on ~800 words. A real LLM swaps the counting step for a transformer with billions of learned weights. Steps ①, ④ and ⑤ work the same way in both.</p>
+      </div>
+    </header>
+
+    <!-- ============ 1 TOKENIZE ============ -->
+    <section id="tokenize" class="sec">
+      <p class="eyebrow">Step 1 · Tokenize</p>
+      <h2>Text becomes a list of numbers</h2>
+      <div class="cols">
+        <div class="prose">
+          <p>A model cannot read letters. A <strong>tokenizer</strong> chops text into pieces from a fixed vocabulary and replaces each piece with its ID number. Most LLMs use <strong>byte-pair encoding (BPE)</strong>: start with single characters, find the pair that appears most often in the training text, glue it into a new token, and repeat tens of thousands of times.</p>
+          <p>Common words end up as one token. Rare words get split into chunks. That is why models sometimes fumble spelling questions like "how many r's in strawberry": they see <code>str</code>·<code>aw</code>·<code>berry</code>, not ten letters.</p>
+          <p>Drag the slider to replay the merges this page learned from its own training text.</p>
+        </div>
+        <div class="panel">
+          <label for="tok-input">Text to tokenize</label>
+          <textarea id="tok-input" rows="2" spellcheck="false">The model predicts the next token. Strawberry tokenization is weird!</textarea>
+          <div class="slider-row">
+            <label for="tok-merges">Merges learned</label>
+            <input type="range" id="tok-merges" min="0" max="300" value="120">
+            <output id="tok-merges-out" class="num">120</output>
+          </div>
+          <div class="chips" id="tok-chips"></div>
+          <div class="stat-line" id="tok-stats"></div>
+          <details class="more">
+            <summary>The merge list, in the order it was learned</summary>
+            <div class="merge-list" id="tok-mergelist"></div>
+          </details>
+        </div>
+      </div>
+      <aside class="real"><b>In real models</b> GPT-2 has 50,257 tokens. GPT-4's tokenizer has about 100,000; Llama 3's has 128,256. English averages roughly 4 characters per token, so a 1,000-word essay is about 1,300 tokens. Context windows and API prices are measured in tokens.</aside>
+    </section>
+
+    <!-- ============ 2 EMBED ============ -->
+    <section id="embed" class="sec">
+      <p class="eyebrow">Step 2 · Embed</p>
+      <h2>Each token becomes a point in meaning-space</h2>
+      <div class="cols">
+        <div class="prose">
+          <p>Every token ID indexes one row of a big table called the <strong>embedding matrix</strong>. That row is a list of numbers, a vector. During training these numbers drift until tokens that are used in similar ways sit close together.</p>
+          <p>Because meaning becomes geometry, you can do arithmetic on it. The classic example from word2vec (2013): <code>king − man + woman</code> lands next to <code>queen</code>.</p>
+          <p>The vectors here have 10 named dimensions so you can read them. Real models use thousands of dimensions that nobody named; researchers dig concepts out of them with interpretability tools (see Research frontier).</p>
+        </div>
+        <div class="panel">
+          <div class="emb-grid">
+            <svg id="emb-map" viewBox="0 0 440 340" role="img" aria-label="2D map of word embeddings"></svg>
+            <div>
+              <p class="mini-h">Vector arithmetic</p>
+              <div class="arith">
+                <input id="emb-a" value="king" aria-label="word A" spellcheck="false"> −
+                <input id="emb-b" value="man" aria-label="word B" spellcheck="false"> +
+                <input id="emb-c" value="woman" aria-label="word C" spellcheck="false">
+              </div>
+              <div id="emb-result" class="emb-result"></div>
+            </div>
+          </div>
+          <p class="mini-h">The vector, dimension by dimension <span class="muted" id="emb-sel-name"></span></p>
+          <div id="emb-vec" class="vec-row"></div>
+          <p class="hint">The map is a flattened 2D shadow of the 10 dimensions, with labels nudged apart so they stay readable. Click any word on the map to inspect its vector. Try <code>prince − boy + girl</code> or <code>puppy − dog + cat</code>.</p>
+        </div>
+      </div>
+      <aside class="real"><b>In real models</b> GPT-3 uses 12,288 numbers per token; Llama 3 8B uses 4,096. A position signal is mixed in too (modern models rotate the vectors by position, a trick called RoPE), because attention on its own does not know word order.</aside>
+    </section>
+
+    <!-- ============ 3 ATTEND ============ -->
+    <section id="attend" class="sec">
+      <p class="eyebrow">Step 3 · Attend</p>
+      <h2>Tokens look at each other</h2>
+      <div class="cols">
+        <div class="prose">
+          <p><strong>Self-attention</strong> is the core idea of the 2017 paper <a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener">"Attention Is All You Need"</a>. Each token makes three vectors:</p>
+          <ul>
+            <li><b>Query</b>: what am I looking for?</li>
+            <li><b>Key</b>: what do I contain?</li>
+            <li><b>Value</b>: what do I pass on if picked?</li>
+          </ul>
+          <p>Score = query · key ÷ √d. A <strong>causal mask</strong> hides future tokens (grey cells), softmax turns each row of scores into weights that sum to 1, and each token's new vector is the weighted mix of the values it attended to.</p>
+          <p>A model runs dozens of these <strong>heads</strong> in parallel, each learning its own kind of lookup, in every one of dozens of layers. Between attention steps a feed-forward network processes each token on its own; that is where much of the model's stored knowledge appears to live.</p>
+        </div>
+        <div class="panel">
+          <label for="att-input">Sentence</label>
+          <input id="att-input" type="text" value="the king saw the queen and the king smiled" spellcheck="false">
+          <div class="seg" id="att-heads" role="tablist" aria-label="Attention head"></div>
+          <p class="head-blurb" id="att-blurb"></p>
+          <div class="heat-wrap"><div id="att-heat" class="heat"></div></div>
+          <div id="att-detail" class="att-detail"></div>
+        </div>
+      </div>
+      <aside class="real"><b>In real models</b> GPT-3 has 96 layers × 96 heads. Nobody writes these heads by hand like this page does; training discovers them. Researchers have found real previous-token heads and induction heads inside trained transformers, which is why they are shown here.</aside>
+    </section>
+
+    <!-- ============ 4 PREDICT ============ -->
+    <section id="predict" class="sec">
+      <p class="eyebrow">Step 4 · Predict &amp; sample</p>
+      <h2>A score for every word, then a dice roll</h2>
+      <div class="cols">
+        <div class="prose">
+          <p>After the last layer, the vector at the final position is multiplied against every token in the vocabulary. The result is one raw score per token, called the <strong>logits</strong>. <strong>Softmax</strong> turns logits into probabilities that add up to 100%.</p>
+          <p>Then the model <em>samples</em>. The settings you see in AI APIs live here:</p>
+          <ul>
+            <li><b>Temperature</b> sharpens (below 1) or flattens (above 1) the distribution.</li>
+            <li><b>Top-k</b> keeps only the k most likely tokens.</li>
+            <li><b>Top-p</b> keeps the smallest set of tokens whose probability adds up to p.</li>
+          </ul>
+          <p>Temperature 0 always picks the top token (greedy). That is why the same prompt can give different answers each time: the model's output is a distribution, and the app rolls dice on it.</p>
+        </div>
+        <div class="panel">
+          <label for="pred-input">Context so far</label>
+          <input id="pred-input" type="text" value="the cat sat on the" spellcheck="false">
+          <div class="controls3">
+            <div><label for="pred-temp">Temperature <output id="pred-temp-out" class="num">1.0</output></label><input type="range" id="pred-temp" min="0" max="2" step="0.05" value="1"></div>
+            <div><label for="pred-topk">Top-k <output id="pred-topk-out" class="num">off</output></label><input type="range" id="pred-topk" min="0" max="20" step="1" value="0"></div>
+            <div><label for="pred-topp">Top-p <output id="pred-topp-out" class="num">1.00</output></label><input type="range" id="pred-topp" min="0.05" max="1" step="0.05" value="1"></div>
+          </div>
+          <p class="stat-line" id="pred-used"></p>
+          <div id="pred-bars" class="bars"></div>
+          <div class="btns">
+            <button class="btn primary" id="pred-sample">Sample one</button>
+            <button class="btn" id="pred-sample20">Sample 20 times</button>
+          </div>
+          <div id="pred-samples" class="samples"></div>
+        </div>
+      </div>
+      <aside class="real"><b>In real models</b> the vocabulary is 50k–200k tokens, so this chart would have that many bars, almost all near zero. The final multiply-and-softmax step is the same.</aside>
+    </section>
+
+    <!-- ============ 5 TRAIN ============ -->
+    <section id="train" class="sec">
+      <p class="eyebrow">Step 5 · Pretrain</p>
+      <h2>Learning is just nudging numbers to lower the surprise</h2>
+      <div class="cols">
+        <div class="prose">
+          <p>Where do the weights come from? <strong>Pretraining</strong>. Show the model text, ask it to predict each next token, and measure how surprised it was with <strong>cross-entropy loss</strong>: minus the log of the probability it gave the right answer.</p>
+          <p><strong>Gradient descent</strong> then nudges every weight a little in the direction that would have lowered that loss. Repeat trillions of times and grammar, facts and some reasoning patterns emerge, because they all help predict the next token.</p>
+          <p>This lab trains a real (tiny) neural network live in your browser: a 26×26 weight matrix (one row per character) that predicts the next <em>character</em> from the current one. Watch the loss fall from "random guessing" toward the best this model shape can do, and watch its writing go from noise to word-ish text.</p>
+        </div>
+        <div class="panel">
+          <div class="btns">
+            <button class="btn primary" id="tr-run">Train</button>
+            <button class="btn" id="tr-step">+10 steps</button>
+            <button class="btn ghost" id="tr-reset">Reset weights</button>
+            <label class="inline" for="tr-lr">Learning rate</label>
+            <select id="tr-lr"><option value="0.05">0.05 slow</option><option value="0.5" selected>0.5</option><option value="2">2 fast</option><option value="12">12 too high</option></select>
+          </div>
+          <div class="train-grid">
+            <div>
+              <p class="mini-h">Loss <span class="muted">(lower is better)</span></p>
+              <svg id="tr-loss" viewBox="0 0 300 180" role="img" aria-label="Training loss curve"></svg>
+              <p class="stat-line num" id="tr-stats"></p>
+            </div>
+            <div>
+              <p class="mini-h">What it predicts <span class="muted">row = current char, column = next char</span></p>
+              <canvas id="tr-heat" width="290" height="290" aria-label="Weight matrix heatmap"></canvas>
+            </div>
+          </div>
+          <p class="mini-h">The model writes <span class="muted">(sampled from current weights)</span></p>
+          <pre class="sample-out" id="tr-sample"></pre>
+        </div>
+      </div>
+      <aside class="real"><b>In real models</b> Llama 3 was pretrained on about 15 trillion tokens; DeepSeek-V3 on 14.8 trillion. Training runs on thousands of GPUs for months. The loop is the one you see here: predict, measure loss, compute gradients (backpropagation), update weights.</aside>
+    </section>
+
+    <!-- ============ 6 ALIGN ============ -->
+    <section id="align" class="sec">
+      <p class="eyebrow">Step 6 · Align</p>
+      <h2>From text-continuer to assistant</h2>
+      <div class="prose wide">
+        <p>A pretrained <strong>base model</strong> only continues text. Ask it a question and it may write three more questions, because that is what follows a question on many web pages. Turning it into ChatGPT or Claude takes further training stages. Pick a stage to see how the same prompt is handled.</p>
+      </div>
+      <div class="panel">
+        <div class="seg" id="al-stages" role="tablist" aria-label="Training stage"></div>
+        <div class="al-view" id="al-view"></div>
+      </div>
+
+      <h3 class="sub">Be the human labeler</h3>
+      <div class="cols">
+        <div class="prose">
+          <p>In <strong>RLHF</strong> (reinforcement learning from human feedback), people compare two answers and pick the better one. A <strong>reward model</strong> learns to predict their choices, and the language model is then trained to score high on that reward.</p>
+          <p>Pick your preferred answer in each pair. A small reward model (logistic regression over five answer traits) fits your choices live. Its learned weights show what <em>you</em> taught it to value.</p>
+          <p>Try preferring the longest answer every time and watch the "long" weight grow. That is <strong>reward hacking</strong> in miniature: the model learns what raters reward, which is not always what is good.</p>
+        </div>
+        <div class="panel">
+          <div id="rm-pair"></div>
+          <p class="mini-h">What the reward model learned <span class="muted" id="rm-count"></span></p>
+          <div id="rm-weights" class="bars"></div>
+          <p class="mini-h">Best-of-4 using your reward model</p>
+          <div id="rm-bon"></div>
+        </div>
+      </div>
+      <aside class="real"><b>In real models</b> InstructGPT (2022) introduced this recipe; ChatGPT used it. Anthropic's Constitutional AI (2022) replaces many human labels with AI feedback guided by written principles. DPO (2023) skips the separate reward model and trains directly on preference pairs.</aside>
+    </section>
+
+    <!-- ============ 7 REASON ============ -->
+    <section id="reason" class="sec">
+      <p class="eyebrow">Step 7 · Reason</p>
+      <h2>Thinking is more tokens, used well</h2>
+      <div class="cols">
+        <div class="prose">
+          <p>A model does a fixed amount of computation per token. If an answer needs more steps than one forward pass can hold, the model can write the steps out and read its own notes. That is <strong>chain-of-thought</strong>: the scratch work becomes part of the context.</p>
+          <p><strong>Reasoning models</strong> (OpenAI o1 in 2024, DeepSeek-R1 in January 2025, Claude's extended thinking) are trained with reinforcement learning to think well before answering. Rewards come from answers that can be checked: math results, passing unit tests.</p>
+          <p>Spending more tokens at answer time is called <strong>test-time compute</strong>. One simple form is <strong>self-consistency</strong>: sample many reasoning paths and take a majority vote. Move the slider and run it.</p>
+        </div>
+        <div class="panel">
+          <p class="q-box"><b>Question</b> A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost?</p>
+          <div class="slider-row">
+            <label for="sc-n">Reasoning paths</label>
+            <input type="range" id="sc-n" min="1" max="25" value="7">
+            <output id="sc-n-out" class="num">7</output>
+            <button class="btn primary" id="sc-run">Sample</button>
+          </div>
+          <div id="sc-paths" class="paths"></div>
+          <div id="sc-vote" class="vote"></div>
+          <p class="mini-h">Accuracy vs. number of paths <span class="muted">(10,000 simulated runs per point, 55% of single paths correct)</span></p>
+          <svg id="sc-curve" viewBox="0 0 560 190" role="img" aria-label="Accuracy rises with more sampled paths"></svg>
+        </div>
+      </div>
+
+      <h3 class="sub">How R1-style training rewards good thinking (GRPO)</h3>
+      <div class="cols">
+        <div class="prose">
+          <p>DeepSeek-R1 was trained with <strong>GRPO</strong> (Group Relative Policy Optimization). For each problem the model writes a group of answers, here 8. Each gets a reward: 1 if correct, 0 if not. Every answer's <strong>advantage</strong> is its reward minus the group average, divided by the group's spread.</p>
+          <p>Positive advantage: make that chain of thought more likely. Negative: less likely. No separate critic network is needed, which made it cheaper than earlier methods. Click answers to flip them right or wrong.</p>
+        </div>
+        <div class="panel">
+          <div id="grpo" class="grpo"></div>
+          <p class="stat-line num" id="grpo-stats"></p>
+        </div>
+      </div>
+      <aside class="real"><b>In real models</b> the DeepSeek-R1 paper reports sampling 16 outputs per question during this RL stage. Its R1-Zero variant learned long reasoning from RL alone, with no supervised examples, though its output was hard to read; R1 added a small "cold start" of curated examples first.</aside>
+    </section>
+
+    <!-- ============ 8 BUILD ============ -->
+    <section id="build" class="sec">
+      <p class="eyebrow">Step 8 · Build</p>
+      <h2>What a chatbot actually sends</h2>
+      <div class="prose wide">
+        <p>A chat model has no memory between messages. Every turn, the app re-sends a single long prompt: instructions, the whole conversation, any retrieved documents, and the tools it may call. Everything must fit inside the <strong>context window</strong>. Products differ mostly in what they put into that prompt and what they do with the reply.</p>
+      </div>
+
+      <div class="cols">
+        <div class="panel">
+          <p class="mini-h">1 · Retrieval (RAG): how Perplexity-style answers get sources</p>
+          <label for="rag-q">Ask the knowledge base</label>
+          <input id="rag-q" type="text" value="How do reasoning models learn to think?" spellcheck="false">
+          <div id="rag-results" class="rag-results"></div>
+        </div>
+        <div class="panel">
+          <p class="mini-h">2 · The prompt that is actually sent</p>
+          <div id="ctx-bar" class="ctx-bar"></div>
+          <pre class="prompt-view" id="rag-prompt"></pre>
+        </div>
+      </div>
+
+      <div class="panel agent">
+        <p class="mini-h">3 · The agent loop: tool use, step by step</p>
+        <div class="agent-grid">
+          <ol class="agent-steps" id="agent-steps"></ol>
+          <div>
+            <pre class="prompt-view" id="agent-msg"></pre>
+            <div class="btns">
+              <button class="btn" id="agent-prev">Back</button>
+              <button class="btn primary" id="agent-next">Next step</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cols">
+        <div class="prose">
+          <h3 class="sub tight">Your first real chatbot</h3>
+          <p>This is a complete, working terminal chatbot using the Anthropic Python SDK. Note how it keeps the <code>history</code> list itself and sends it every turn. That is the "memory".</p>
+          <p>Run it with <code>pip install anthropic</code>, set <code>ANTHROPIC_API_KEY</code>, then <code>python chat.py</code>. This repo has a fuller version in <code>examples/chat.py</code> (it also handles declined requests), plus the full tool-use loop from step 3 in <code>examples/agent.py</code>.</p>
+        </div>
+        <div class="panel code-panel">
+          <div class="code-head"><span>chat.py</span><button class="btn small" id="copy-chat">Copy</button></div>
+<pre class="code" id="chat-code">import anthropic
+
+client = anthropic.Anthropic()   # reads ANTHROPIC_API_KEY
+history = []                     # the model's only "memory"
+
+while True:
+    user = input("you › ")
+    history.append({"role": "user", "content": user})
+
+    reply = client.messages.create(
+        model="claude-opus-5-5",
+        max_tokens=2048,
+        system="You are a patient tutor who explains AI concepts simply.",
+        messages=history,        # the WHOLE conversation, every turn
+    )
+    text = "".join(b.text for b in reply.content if b.type == "text")
+    history.append({"role": "assistant", "content": reply.content})
+    print("claude ›", text)
+    print(f"[{reply.usage.input_tokens} tokens in, {reply.usage.output_tokens} out]")</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ HISTORY ============ -->
+    <section id="history" class="sec">
+      <p class="eyebrow">Context · 1950 to now</p>
+      <h2>How we got here</h2>
+      <div class="prose wide"><p>Filter by thread. Each entry says what changed and why it mattered for the models you use today.</p></div>
+      <div class="seg wrap" id="tl-filter" role="tablist" aria-label="Filter timeline"></div>
+      <ol class="timeline" id="timeline"></ol>
+    </section>
+
+    <!-- ============ FRONTIER ============ -->
+    <section id="frontier" class="sec">
+      <p class="eyebrow">Context · open questions</p>
+      <h2>The research frontier</h2>
+      <div class="prose wide"><p>Where researchers are pushing in 2025–2026. Each card names the open question and links to a primary source to start with.</p></div>
+      <div class="cards" id="frontier-cards"></div>
+    </section>
+
+    <!-- ============ LEARN ============ -->
+    <section id="learn" class="sec">
+      <p class="eyebrow">Context · go deeper</p>
+      <h2>Read, watch, build next</h2>
+      <div class="learn" id="learn-list"></div>
+    </section>
+
+    <footer class="foot">
+      <p>Every model on this page runs in your browser in plain JavaScript, with no AI service behind it. Hand-built parts (the embedding dimensions, the three attention heads, the scripted alignment examples) are labeled where they appear.</p>
+    </footer>
+  </main>
+</div>
+
+<script src="js/corpus.js"></script>
+<script src="js/core.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/content.js"></script>
+<script src="js/sections-model.js"></script>
+<script src="js/sections-make.js"></script>
+<script src="js/sections-build.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
