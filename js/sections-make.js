@@ -6,69 +6,38 @@ window.LLM = window.LLM || {};
   const S = (L.sections = L.sections || {});
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-  // ================= 5 PRETRAIN: a character model trained by gradient descent =================
+  // ================= 5 PRETRAIN: drives a CharModel and draws it =================
   S.train = function () {
-    const txt = L.CORPUS.toLowerCase().replace(/\s+/g, " ").replace(/[^a-z .]/g, "");
-    const chars = [...new Set(txt)].sort();
-    const V = chars.length, ix = new Map(chars.map((c, i) => [c, i]));
-    const C = [...Array(V)].map(() => new Float64Array(V));
-    for (let i = 0; i < txt.length - 1; i++) C[ix.get(txt[i])][ix.get(txt[i + 1])]++;
-    const N = txt.length - 1, rowN = C.map((r) => r.reduce((a, b) => a + b, 0));
-    let best = 0;
-    C.forEach((r, a) => r.forEach((c, b) => { if (c) best -= c * Math.log(c / rowN[a]); }));
-    best /= N;
-    const uniform = Math.log(V);
-    let W, P, steps, losses, timer = null, rng = M.rng(7);
+    let model, losses, timer = null;
+    const sampleRng = M.rng(11);
 
-    function forward() {
-      let loss = 0;
-      P = W.map((row, a) => {
-        const p = M.softmax(Array.from(row));
-        for (let b = 0; b < V; b++) if (C[a][b]) loss -= C[a][b] * Math.log(Math.max(p[b], 1e-12));
-        return p;
-      });
-      return loss / N;
-    }
     function reset() {
-      W = [...Array(V)].map(() => new Float64Array(V).map(() => (rng() - 0.5) * 0.2));
-      steps = 0;
-      losses = [[0, forward()]];
+      model = L.CharModel.fromText(L.CORPUS);
+      losses = [[0, model.loss]];
       draw();
     }
     function step(n) {
-      const lr = +U.$("#tr-lr").value;
       for (let k = 0; k < n; k++) {
-        // Gradient of mean cross-entropy w.r.t. each weight: (predicted − actual) counts / N.
-        for (let a = 0; a < V; a++) for (let b = 0; b < V; b++) W[a][b] -= lr * V * (rowN[a] * P[a][b] - C[a][b]) / N;
-        steps++;
-        const l = forward();
-        losses.push([steps, isFinite(l) ? l : 99]);
+        model.step(+U.$("#tr-lr").value);
+        losses.push([model.steps, Number.isFinite(model.loss) ? model.loss : 99]);
       }
       draw();
     }
-    function sample(len = 150) {
-      let c = ix.get("t"), s = "t";
-      for (let i = 0; i < len; i++) {
-        c = M.sampleIndex(P[c], rng());
-        s += chars[c];
-      }
-      return s;
-    }
     function draw() {
-      const last = losses[losses.length - 1][1];
+      const { steps, loss, chars, probs: P, size: V } = model;
       const xMax = Math.max(100, Math.ceil(steps / 100) * 100);
       U.lineChart(U.$("#tr-loss"), {
         xMax, yMin: 1.5, yMax: 4,
         yTicks: [2, 3, 4],
         series: [{ points: losses, color: css("--accent") || "#2a3acf", area: true }],
         hlines: [
-          { y: uniform, label: `random guess ${uniform.toFixed(2)}` },
-          { y: best, label: `best this model can do ${best.toFixed(2)}`, color: "var(--good)" },
+          { y: model.uniformLoss, label: `random guess ${model.uniformLoss.toFixed(2)}` },
+          { y: model.bestLoss, label: `best this model can do ${model.bestLoss.toFixed(2)}`, color: "var(--good)" },
         ],
         xLabel: `step ${steps}`,
       });
-      const diverged = last > uniform + 0.5;
-      U.$("#tr-stats").innerHTML = `step ${steps} · loss ${last > 50 ? "exploding" : last.toFixed(3)} · ${V * V} weights` + (diverged ? ` · <span style="color:var(--bad)">learning rate too high: updates overshoot</span>` : "");
+      const shown = !Number.isFinite(loss) || loss > 50 ? "exploding" : loss.toFixed(3);
+      U.$("#tr-stats").innerHTML = `step ${steps} · loss ${shown} · ${V * V} weights` + (model.diverged ? ` · <span style="color:var(--bad)">learning rate too high: updates overshoot</span>` : "");
       // Probability heatmap
       const cv = U.$("#tr-heat"), g = cv.getContext("2d");
       const W0 = cv.width, pad = 14, cell = (W0 - pad) / V;
@@ -85,18 +54,18 @@ window.LLM = window.LLM || {};
       });
       const acc = css("--accent");
       for (let a = 0; a < V; a++) for (let b = 0; b < V; b++) {
-        g.globalAlpha = Math.min(1, Math.sqrt(P[a][b]) * 1.4);
+        g.globalAlpha = Math.min(1, Math.sqrt(P[a][b] || 0) * 1.4);
         g.fillStyle = acc;
         g.fillRect(pad + b * cell, pad + a * cell, cell - 1, cell - 1);
       }
       g.globalAlpha = 1;
-      U.$("#tr-sample").textContent = sample();
+      U.$("#tr-sample").textContent = model.sample(sampleRng);
     }
     function stop() { clearInterval(timer); timer = null; U.$("#tr-run").textContent = "Train"; }
     U.$("#tr-run").onclick = () => {
       if (timer) return stop();
       U.$("#tr-run").textContent = "Pause";
-      timer = setInterval(() => { step(3); if (steps >= 600) stop(); }, 40);
+      timer = setInterval(() => { step(3); if (model.steps >= 600) stop(); }, 40);
     };
     U.$("#tr-step").onclick = () => step(10);
     U.$("#tr-reset").onclick = () => { stop(); reset(); };

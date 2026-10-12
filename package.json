@@ -1,0 +1,8 @@
+{
+  "name": "token-by-token",
+  "private": true,
+  "description": "Interactive field guide to how LLMs work. No build step: open index.html.",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

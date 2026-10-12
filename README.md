@@ -41,9 +41,17 @@ index.html            page structure and explanations
 css/style.css         design tokens (light + dark) and layout
 js/corpus.js          training text and the RAG knowledge base
 js/core.js            math, BPE, trigram model, embeddings, attention, retrieval
+js/learn.js           CharModel: the model trained live in the Pretrain station
 js/ui.js              DOM helpers, bar and line charts
 js/sections-*.js      each station's interactive logic
 js/content.js         timeline, frontier and reading-list data
 js/app.js             startup and navigation
 examples/             runnable Python chatbot and agent
+test/                 node:test suites for the model modules (npm test)
+CONTEXT.md            the project's glossary
+docs/adr/             recorded design decisions
 ```
+
+## Tests
+
+`npm test` runs the suites in `test/` with Node's built-in test runner. Nothing to install.
