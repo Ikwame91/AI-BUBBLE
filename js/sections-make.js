@@ -156,21 +156,8 @@ window.LLM = window.LLM || {};
     ["Put it in water like flowers, on the counter.", [1, 0.4, 0.5, 0.1, 0]],
   ] };
   function rewardModel() {
-    const prefs = []; // {win: features, lose: features}
-    let idx = 0, w = TRAITS.map(() => 0);
-    function fit() {
-      // Bradley–Terry: P(winner preferred) = sigmoid(w · (f_win − f_lose)). Gradient ascent with light L2.
-      w = TRAITS.map(() => 0);
-      for (let it = 0; it < 400; it++) {
-        const g = w.map((x) => -0.05 * x);
-        prefs.forEach(({ win, lose }) => {
-          const d = M.sub(win, lose);
-          const p = M.sigmoid(M.dot(w, d));
-          d.forEach((x, i) => (g[i] += (1 - p) * x));
-        });
-        w = w.map((x, i) => x + 0.3 * g[i]);
-      }
-    }
+    const prefs = []; // {win: traits, lose: traits}
+    let idx = 0, rm = L.Feedback.fitRewardModel(prefs);
     function render() {
       const pr = PAIRS[idx % PAIRS.length];
       const flip = Math.floor(idx / PAIRS.length) % 2 === 1;
@@ -182,13 +169,14 @@ window.LLM = window.LLM || {};
         const win = b.dataset.c === "0" ? x : y, lose = b.dataset.c === "0" ? y : x;
         prefs.push({ win: win[1], lose: lose[1] });
         idx++;
-        fit();
+        rm = L.Feedback.fitRewardModel(prefs);
         render();
       }));
+      const w = rm.weights.length ? rm.weights : TRAITS.map(() => 0);
       const mx = Math.max(0.01, ...w.map(Math.abs));
       U.$("#rm-count").textContent = `· from ${prefs.length} comparison${prefs.length === 1 ? "" : "s"}`;
       U.bars(U.$("#rm-weights"), TRAITS.map((t, i) => ({ label: t, value: Math.abs(w[i]) / mx, text: (w[i] >= 0 ? "+" : "") + w[i].toFixed(2), cls: w[i] < 0 ? "neg" : "" })));
-      const scores = BON.c.map(([, f]) => M.dot(w, f));
+      const scores = BON.c.map(([, f]) => rm.score(f));
       const top = prefs.length ? scores.indexOf(Math.max(...scores)) : -1;
       U.$("#rm-bon").innerHTML = `<p class="pair-q" style="font-size:13px"><span class="tag">new prompt</span> ${BON.q}</p><div class="bon">${BON.c.map(([t], i) => `<div class="row${i === top ? " win" : ""}"><span>${U.esc(t)}</span><span class="num">${prefs.length ? scores[i].toFixed(2) : "–"}</span></div>`).join("")}</div>
         <p class="hint">${prefs.length ? "The highlighted answer has the highest reward. RL training pushes the model toward answers like it." : "Label a few pairs and the reward model will start ranking these."}</p>`;
@@ -202,28 +190,13 @@ window.LLM = window.LLM || {};
     { a: "$0.10", ok: false, p: 0.35, t: ["The bat costs $1.00, so the ball is 1.10 − 1.00 = 0.10.", "Subtract: 1.10 − 1.00 = 0.10. The ball is ten cents.", "Total is 1.10 and the bat is 1.00 more, so the ball is 0.10."] },
     { a: "$0.55", ok: false, p: 0.1, t: ["Split the total evenly: 1.10 ÷ 2 = 0.55.", "They share the cost: 0.55 each, so the ball is 0.55."] },
   ];
-  function drawPath(r) {
-    let acc = 0;
-    for (const p of PATHS) { acc += p.p; if (r < acc) return p; }
-    return PATHS[0];
-  }
-  function vote(n, rand) {
-    const counts = new Map();
-    for (let i = 0; i < n; i++) { const a = drawPath(rand()).a; counts.set(a, (counts.get(a) || 0) + 1); }
-    const max = Math.max(...counts.values());
-    const tied = [...counts].filter(([, c]) => c === max).map(([a]) => a);
-    return { counts, winner: tied[Math.floor(rand() * tied.length)] };
-  }
+  const ODDS = PATHS.map((p) => ({ answer: p.a, p: p.p, correct: p.ok }));
   S.reason = function () {
     const sl = U.$("#sc-n");
     // Accuracy curve: Monte Carlo over 10,000 runs per n.
     const rand = M.rng(42);
     const curve = [];
-    for (let n = 1; n <= 25; n++) {
-      let ok = 0;
-      for (let t = 0; t < 10000; t++) if (vote(n, rand).winner === "$0.05") ok++;
-      curve.push([n, ok / 100]);
-    }
+    for (let n = 1; n <= 25; n++) curve.push([n, L.Feedback.votingAccuracy(ODDS, n, 10000, rand) * 100]);
     function drawCurve() {
       const n = +sl.value;
       U.lineChart(U.$("#sc-curve"), {
@@ -236,13 +209,13 @@ window.LLM = window.LLM || {};
       const n = +sl.value;
       U.$("#sc-n-out").textContent = n;
       const r = Math.random;
-      const drawn = [...Array(n)].map(() => { const p = drawPath(r()); return { ...p, text: p.t[Math.floor(r() * p.t.length)] }; });
+      const drawn = [...Array(n)].map(() => {
+        const p = PATHS[ODDS.indexOf(L.Feedback.drawAnswer(ODDS, r()))];
+        return { ...p, text: p.t[Math.floor(r() * p.t.length)] };
+      });
       U.$("#sc-paths").innerHTML = drawn.map((d, i) => `<div class="path ${d.ok ? "ok" : "no"}"><span class="num muted">${i + 1}</span><span>${U.esc(d.text)}</span><span class="ans">${d.a}</span></div>`).join("");
-      const counts = new Map();
-      drawn.forEach((d) => counts.set(d.a, (counts.get(d.a) || 0) + 1));
-      const max = Math.max(...counts.values());
-      const winners = [...counts].filter(([, c]) => c === max);
-      U.$("#sc-vote").innerHTML = `<b style="font-family:var(--font-body);font-size:13px">Majority vote:</b>` + [...counts].sort((a, b) => b[1] - a[1]).map(([a, c]) => `<span class="${c === max ? "win" : ""}">${a} × ${c}</span>`).join("") + (winners.length > 1 ? `<span>tie: pick at random</span>` : "");
+      const { counts, tied, winner } = L.Feedback.majorityVote(drawn.map((d) => d.a), r);
+      U.$("#sc-vote").innerHTML = `<b style="font-family:var(--font-body);font-size:13px">Majority vote:</b>` + [...counts].sort((a, b) => b[1] - a[1]).map(([a, c]) => `<span class="${a === winner ? "win" : ""}">${a} × ${c}</span>`).join("") + (tied.length > 1 ? `<span>tie between ${tied.join(" and ")}: picked ${winner} at random</span>` : "");
       drawCurve();
     }
     sl.addEventListener("input", () => { U.$("#sc-n-out").textContent = sl.value; drawCurve(); });
@@ -261,8 +234,7 @@ window.LLM = window.LLM || {};
     const el = U.$("#grpo");
     function render() {
       const r = answers.map(([, ok]) => (ok ? 1 : 0));
-      const mean = M.mean(r), sd = M.std(r);
-      const adv = r.map((x) => (sd > 0 ? (x - mean) / sd : 0));
+      const { mean, spread: sd, advantages: adv } = L.Feedback.groupAdvantages(r);
       el.innerHTML = answers.map(([t, ok], i) => {
         const a = adv[i], w = Math.min(50, Math.abs(a) * 25);
         return `<button class="g-ans ${ok ? "ok" : "no"}" data-i="${i}" title="Click to flip right/wrong"><span>${U.esc(t)}</span><span class="r">reward ${r[i]}</span><span class="adv num">${a >= 0 ? "+" : ""}${a.toFixed(2)}</span><span class="advbar"><i style="${a >= 0 ? `left:50%;width:${w}%;background:var(--good)` : `left:${50 - w}%;width:${w}%;background:var(--bad)`}"></i></span></button>`;

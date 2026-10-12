@@ -1,4 +1,5 @@
-// How models learn: the CharModel trained live in the Pretrain station.
+// How models learn: the CharModel trained live in the Pretrain station, and the Feedback
+// signals shown in the Align and Reason stations.
 // No DOM in this file; stations drive these models and draw what they report.
 window.LLM = window.LLM || {};
 
@@ -74,4 +75,62 @@ window.LLM = window.LLM || {};
   }
 
   L.CharModel = CharModel;
+
+  // ---------- Feedback: the learning signals behind RLHF and reasoning RL ----------
+  const Feedback = (L.Feedback = {});
+
+  // Fit a reward model to human comparisons. prefs: [{ win: traits[], lose: traits[] }].
+  // Bradley–Terry: P(win preferred) = sigmoid(w · (win − lose)), fitted by gradient ascent
+  // with light L2, so a single comparison cannot push weights to infinity.
+  Feedback.fitRewardModel = function (prefs) {
+    const dims = prefs.length ? prefs[0].win.length : 0;
+    let w = new Array(dims).fill(0);
+    for (let it = 0; it < 400 && prefs.length; it++) {
+      const g = w.map((x) => -0.05 * x);
+      for (const { win, lose } of prefs) {
+        const d = M.sub(win, lose);
+        const p = M.sigmoid(M.dot(w, d));
+        d.forEach((x, i) => (g[i] += (1 - p) * x));
+      }
+      w = w.map((x, i) => x + 0.3 * g[i]);
+    }
+    return { weights: w, score: (traits) => (dims ? M.dot(w, traits) : 0) };
+  };
+
+  // Draw one answer from [{ answer, p, correct }] using a roll in [0, 1).
+  Feedback.drawAnswer = function (odds, roll) {
+    let acc = 0;
+    for (const o of odds) { acc += o.p; if (roll < acc) return o; }
+    return odds[odds.length - 1];
+  };
+
+  // Majority vote over answer strings. Ties are broken with rng(), so call sites that
+  // simulate and call sites that display follow the same rule.
+  Feedback.majorityVote = function (answers, rng) {
+    const counts = new Map();
+    for (const a of answers) counts.set(a, (counts.get(a) || 0) + 1);
+    const max = Math.max(...counts.values());
+    const tied = [...counts].filter(([, c]) => c === max).map(([a]) => a);
+    return { counts, tied, winner: tied[Math.floor(rng() * tied.length)] };
+  };
+
+  // Self-consistency: how often does a majority vote over `paths` sampled answers land on
+  // a correct one? Monte Carlo over `trials` runs.
+  Feedback.votingAccuracy = function (odds, paths, trials, rng) {
+    let ok = 0;
+    for (let t = 0; t < trials; t++) {
+      const answers = [];
+      for (let i = 0; i < paths; i++) answers.push(Feedback.drawAnswer(odds, rng()).answer);
+      const winner = Feedback.majorityVote(answers, rng).winner;
+      if (odds.find((o) => o.answer === winner).correct) ok++;
+    }
+    return ok / trials;
+  };
+
+  // GRPO: each answer's advantage is its reward minus the group mean, divided by the
+  // group's spread. Zero spread means every answer scored the same: no learning signal.
+  Feedback.groupAdvantages = function (rewards) {
+    const mean = M.mean(rewards), spread = M.std(rewards);
+    return { mean, spread, advantages: rewards.map((r) => (spread > 0 ? (r - mean) / spread : 0)) };
+  };
 })(window.LLM);

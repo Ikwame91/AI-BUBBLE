@@ -41,7 +41,7 @@ index.html            page structure and explanations
 css/style.css         design tokens (light + dark) and layout
 js/corpus.js          training text and the RAG knowledge base
 js/core.js            math, BPE, trigram model, Decoder, embeddings, attention, retrieval
-js/learn.js           CharModel: the model trained live in the Pretrain station
+js/learn.js           CharModel (Pretrain) and Feedback (Align, Reason)
 js/ui.js              DOM helpers, bar and line charts
 js/sections-*.js      each station's interactive logic
 js/content.js         timeline, frontier and reading-list data
