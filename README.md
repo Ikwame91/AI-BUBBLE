@@ -40,7 +40,7 @@ Both opt in to server-side refusal fallbacks (`fallbacks="default"`), so a reque
 index.html            page structure and explanations
 css/style.css         design tokens (light + dark) and layout
 js/corpus.js          training text and the RAG knowledge base
-js/core.js            math, BPE, trigram model, embeddings, attention, retrieval
+js/core.js            math, BPE, trigram model, Decoder, embeddings, attention, retrieval
 js/learn.js           CharModel: the model trained live in the Pretrain station
 js/ui.js              DOM helpers, bar and line charts
 js/sections-*.js      each station's interactive logic

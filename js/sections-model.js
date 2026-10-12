@@ -5,7 +5,7 @@ window.LLM = window.LLM || {};
   const U = L.ui, M = L.math;
   const S = (L.sections = L.sections || {});
   const ngram = () => (L._ngram = L._ngram || new L.NGram(L.CORPUS));
-  const joinWords = (ws) => ws.join(" ").replace(/ ([.,!?])/g, "$1");
+  const decoder = () => (L._decoder = L._decoder || new L.Decoder(ngram()));
   const tokColor = (id) => `color-mix(in oklab, hsl(${(id * 47) % 360} 70% 55%) 24%, var(--surface))`;
 
   // ================= HERO: the generation loop =================
@@ -19,37 +19,30 @@ window.LLM = window.LLM || {};
     stagesEl.after(out);
 
     function render(step) {
-      const ng = ngram();
+      const ng = ngram(), dec = decoder();
       const promptWords = L.words(input.value);
       const all = promptWords.concat(generated);
       const ids = all.map((w) => (ng.index.has(w) ? ng.index.get(w) : "?"));
-      const d = ng.distribution(joinWords(all));
-      const s = L.applySampling(d.logits, { temperature: T });
-      const top = s.order.slice(0, 5);
+      const { candidates, used } = dec.next(all, { temperature: T });
+      const top = candidates.slice(0, 5);
       const last2 = all.slice(-2).join(" ");
       const st = [];
       const tail = all.slice(-6), tailIds = ids.slice(-6);
       st.push(["①", "Tokenize", "#tokenize", (all.length > 6 ? "… " : "") + tail.map((w, i) => `<span class="chip" style="background:${tokColor(typeof tailIds[i] === "number" ? tailIds[i] : 3)}">${U.esc(w)}<small>${tailIds[i]}</small></span>`).join(" ") + `<div class="muted" style="margin-top:6px">${all.length} tokens in context (this model uses whole words as tokens)</div>`]);
-      st.push(["②", "Read context", "#attend", `Looks at <b>"${U.esc(last2)}"</b>.<br>${U.esc(d.used)}.<div class="muted" style="margin-top:6px">In a transformer: embeddings + attention layers.</div>`]);
-      st.push(["③", "Score (logits)", "#predict", top.map((i) => `${U.esc(ng.vocab[i]).padEnd(8, " ").replace(/ /g, "&nbsp;")} ${d.logits[i].toFixed(2)}`).join("<br>") + `<div class="muted" style="margin-top:6px">+ ${ng.vocab.length - 5} more</div>`]);
+      st.push(["②", "Read context", "#attend", `Looks at <b>"${U.esc(last2)}"</b>.<br>${U.esc(used)}.<div class="muted" style="margin-top:6px">In a transformer: embeddings + attention layers.</div>`]);
+      st.push(["③", "Score (logits)", "#predict", top.map((c) => `${U.esc(c.token).padEnd(8, " ").replace(/ /g, "&nbsp;")} ${c.logit.toFixed(2)}`).join("<br>") + `<div class="muted" style="margin-top:6px">+ ${candidates.length - 5} more</div>`]);
       st.push(["④", "Softmax", "#predict", `<div class="bars mini"></div><div class="muted" style="margin-top:6px">temperature ${T}</div>`]);
-      st.push(["⑤", "Sample", "#predict", lastPick ? `dice = <b>${lastPick.r.toFixed(3)}</b><br>→ picked <b style="color:var(--pick)">"${U.esc(lastPick.w)}"</b> (${U.pct(lastPick.p)})<div class="muted" style="margin-top:6px">appended; loop repeats</div>` : `<span class="muted">Press Next token to roll the dice.</span>`]);
+      st.push(["⑤", "Sample", "#predict", lastPick ? `dice = <b>${lastPick.roll.toFixed(3)}</b><br>→ picked <b style="color:var(--pick)">"${U.esc(lastPick.token)}"</b> (${U.pct(lastPick.p)})<div class="muted" style="margin-top:6px">appended; loop repeats</div>` : `<span class="muted">Press Next token to roll the dice.</span>`]);
       stagesEl.innerHTML = st.map(([n, h, href, body]) => `<div class="stage${step ? " flash" : ""}"><h4><i>${n}</i>${h}<a href="${href}">how</a></h4><div class="body">${body}</div></div>`).join("");
-      U.bars(stagesEl.querySelector(".bars.mini"), top.map((i) => ({ label: ng.vocab[i], value: s.final[i], text: U.pct(s.final[i]) })));
+      U.bars(stagesEl.querySelector(".bars.mini"), top.map((c) => ({ label: c.token, value: c.final, text: U.pct(c.final) })));
       stagesEl.querySelectorAll(".bars.mini .bar").forEach((b) => (b.style.gridTemplateColumns = "4.5em 1fr 3.4em"));
-      out.innerHTML = U.esc(joinWords(promptWords)) + (generated.length ? " " : "") + generated.map((w, i) => `<span class="gen${i === generated.length - 1 ? " last" : ""}">${U.esc(w)}</span>`).join(" ").replace(/ <span class="gen( last)?">([.,!?])/g, '<span class="gen$1">$2');
-      return { d, s };
+      out.innerHTML = U.esc(dec.detokenize(promptWords)) + (generated.length ? " " : "") + generated.map((w, i) => `<span class="gen${i === generated.length - 1 ? " last" : ""}">${U.esc(w)}</span>`).join(" ").replace(/ <span class="gen( last)?">([.,!?])/g, '<span class="gen$1">$2');
     }
 
     function step() {
-      const ng = ngram();
       const all = L.words(input.value).concat(generated);
-      const d = ng.distribution(joinWords(all));
-      const s = L.applySampling(d.logits, { temperature: T });
-      const r = Math.random();
-      const i = M.sampleIndex(s.final, r);
-      lastPick = { w: ng.vocab[i], p: s.final[i], r };
-      generated.push(ng.vocab[i]);
+      lastPick = decoder().next(all, { temperature: T }, Math.random).pick;
+      generated.push(lastPick.token);
       render(true);
     }
     U.$("#loop-step").onclick = step;
@@ -198,49 +191,27 @@ window.LLM = window.LLM || {};
     const inp = U.$("#pred-input"), t = U.$("#pred-temp"), k = U.$("#pred-topk"), p = U.$("#pred-topp");
     let hit = null;
     const params = () => ({ temperature: +t.value, topK: +k.value, topP: +p.value });
-    function dist() {
-      const d = ngram().distribution(inp.value);
-      const pr = params();
-      if (pr.temperature === 0) {
-        // Greedy: all probability on the top token.
-        const top = d.logits.indexOf(Math.max(...d.logits));
-        const s = L.applySampling(d.logits, { ...pr, temperature: 1 });
-        s.final = s.final.map((_, i) => (i === top ? 1 : 0));
-        s.scaled = s.final.slice();
-        s.keep = s.final.map((x) => x > 0);
-        return { d, s };
-      }
-      return { d, s: L.applySampling(d.logits, pr) };
-    }
+    const next = (rng) => decoder().next(L.words(inp.value), params(), rng);
     function render() {
       U.$("#pred-temp-out").textContent = (+t.value).toFixed(2) + ((+t.value) === 0 ? " greedy" : "");
       U.$("#pred-topk-out").textContent = +k.value ? k.value : "off";
       U.$("#pred-topp-out").textContent = (+p.value).toFixed(2);
-      const { d, s } = dist();
-      const ng = ngram();
-      U.$("#pred-used").textContent = `Model used: ${d.used}. Solid bar = final probability, dashed outline = probability at temperature 1.`;
-      const order = [...s.base.keys()].sort((a, b) => s.base[b] - s.base[a]).slice(0, 12);
-      U.bars(U.$("#pred-bars"), order.map((i) => ({
-        label: ng.vocab[i], value: s.final[i], ghost: s.base[i], text: U.pct(s.final[i]),
-        cls: (!s.keep[i] || s.final[i] === 0 ? "cut" : "") + (i === hit ? " hit" : ""),
+      const { candidates, used } = next();
+      U.$("#pred-used").textContent = `Model used: ${used}. Solid bar = final probability, dashed outline = probability at temperature 1.`;
+      U.bars(U.$("#pred-bars"), candidates.slice(0, 12).map((c) => ({
+        label: c.token, value: c.final, ghost: c.base, text: U.pct(c.final),
+        cls: (c.kept ? "" : "cut") + (c.token === hit ? " hit" : ""),
       })));
     }
-    function sampleOne() {
-      const { s } = dist();
-      const i = M.sampleIndex(s.final);
-      hit = i;
-      render();
-      return ngram().vocab[i];
-    }
     U.$("#pred-sample").onclick = () => {
-      const w = sampleOne();
-      U.$("#pred-samples").innerHTML = `<span>→ ${U.esc(w)}</span>`;
+      hit = next(Math.random).pick.token;
+      render();
+      U.$("#pred-samples").innerHTML = `<span>→ ${U.esc(hit)}</span>`;
     };
     U.$("#pred-sample20").onclick = () => {
       const counts = new Map();
-      const { s } = dist();
       for (let n = 0; n < 20; n++) {
-        const w = ngram().vocab[M.sampleIndex(s.final)];
+        const w = next(Math.random).pick.token;
         counts.set(w, (counts.get(w) || 0) + 1);
       }
       hit = null;

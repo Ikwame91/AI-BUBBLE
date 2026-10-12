@@ -177,25 +177,53 @@ window.LLM = window.LLM || {};
     };
   };
 
-  // Turn logits into the final sampling distribution, the same way every LLM API does.
-  L.applySampling = function (logits, { temperature = 1, topK = 0, topP = 1 }) {
-    const n = logits.length;
+  // ---------- Decoder ----------
+  // Turns a model's scores into one chosen token: temperature, top-k, top-p (or greedy at
+  // temperature 0), then the dice roll. These are the same settings every LLM API exposes.
+  // The model must offer `vocab` and `distribution(text) → { logits, used }`.
+  L.Decoder = function (model) {
+    this.model = model;
+  };
+  L.Decoder.prototype.detokenize = function (tokens) {
+    return tokens.join(" ").replace(/ ([.,!?])/g, "$1");
+  };
+  // next(tokens, settings, rng?) → { candidates, pick, used }
+  //   candidates: every vocab token as { token, logit, base, final, kept }, most likely first
+  //               (base = probability at temperature 1, final = after the settings).
+  //   pick: { token, p, roll } drawn with rng(); null when no rng is given (a preview).
+  L.Decoder.prototype.next = function (tokens, { temperature = 1, topK = 0, topP = 1 } = {}, rng) {
+    const { logits, used } = this.model.distribution(this.detokenize(tokens));
+    const vocab = this.model.vocab;
     const base = M.softmax(logits, 1);
-    const scaled = M.softmax(logits, temperature);
-    const order = [...Array(n).keys()].sort((i, j) => scaled[j] - scaled[i]);
-    const keep = new Array(n).fill(true);
-    if (topK > 0) order.forEach((idx, rank) => { if (rank >= topK) keep[idx] = false; });
-    if (topP < 1) {
-      let acc = 0;
-      for (const idx of order) {
-        if (!keep[idx]) continue;
-        if (acc >= topP) keep[idx] = false;
-        acc += scaled[idx];
+    // Stable sort: ties keep vocabulary order, so greedy picks the first of equals.
+    const order = [...vocab.keys()].sort((i, j) => base[j] - base[i]);
+    let final;
+    if (temperature === 0) {
+      final = vocab.map((_, i) => (i === order[0] ? 1 : 0));
+    } else {
+      const scaled = M.softmax(logits, temperature);
+      const keep = vocab.map(() => true);
+      if (topK > 0) order.forEach((i, rank) => { if (rank >= topK) keep[i] = false; });
+      if (topP < 1) {
+        let acc = 0;
+        for (const i of order) {
+          if (!keep[i]) continue;
+          if (acc >= topP) keep[i] = false;
+          acc += scaled[i];
+        }
       }
+      const kept = scaled.map((p, i) => (keep[i] ? p : 0));
+      const sum = kept.reduce((x, y) => x + y, 0) || 1;
+      final = kept.map((p) => p / sum);
     }
-    const kept = scaled.map((p, i) => (keep[i] ? p : 0));
-    const s = kept.reduce((a, b) => a + b, 0) || 1;
-    return { base, scaled, final: kept.map((p) => p / s), keep, order };
+    const candidates = order.map((i) => ({ token: vocab[i], logit: logits[i], base: base[i], final: final[i], kept: final[i] > 0 }));
+    let pick = null;
+    if (rng) {
+      const roll = rng();
+      const c = candidates[M.sampleIndex(candidates.map((x) => x.final), roll)];
+      pick = { token: c.token, p: c.final, roll };
+    }
+    return { candidates, pick, used };
   };
 
   // ---------- Embeddings ----------
